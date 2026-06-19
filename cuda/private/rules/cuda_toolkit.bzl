@@ -9,6 +9,10 @@ def _impl(ctx):
         nvlink = ctx.file.nvlink,
         link_stub = ctx.file.link_stub,
         bin2c = ctx.file.bin2c,
+        cudafe = ctx.file.cudafe,
+        cudafe_clang_version = ctx.attr.cudafe_clang_version,
+        cicc = ctx.file.cicc,
+        ptxas = ctx.file.ptxas,
         fatbinary = ctx.file.fatbinary,
     )
 
@@ -21,6 +25,10 @@ cuda_toolkit = rule(
         "nvlink": attr.label(allow_single_file = True, doc = "The nvlink executable."),
         "link_stub": attr.label(allow_single_file = True, doc = "The link.stub text file."),
         "bin2c": attr.label(allow_single_file = True, doc = "The bin2c executable."),
+        "cudafe": attr.label(allow_single_file = True, mandatory = True, doc = "The cudafe++ executable."),
+        "cudafe_clang_version": attr.string(mandatory = True, doc = "Clang version integer passed to cudafe++ when using clang as the host compiler."),
+        "cicc": attr.label(allow_single_file = True, mandatory = True, doc = "The cicc executable."),
+        "ptxas": attr.label(allow_single_file = True, mandatory = True, doc = "The ptxas executable."),
         "fatbinary": attr.label(allow_single_file = True, doc = "The fatbinary executable."),
     },
     provides = [CudaToolkitInfo],

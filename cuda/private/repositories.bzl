@@ -53,6 +53,9 @@ def _detect_local_cuda_toolkit(repository_ctx):
     link_stub = "@rules_cuda//cuda/dummy:link.stub"
     bin2c = "@rules_cuda//cuda/dummy:bin2c"
     fatbinary = "@rules_cuda//cuda/dummy:fatbinary"
+    cudafe = "@rules_cuda//cuda/dummy:cudafe++"
+    cicc = "@rules_cuda//cuda/dummy:cicc"
+    ptxas = "@rules_cuda//cuda/dummy:ptxas"
     if cuda_path != None:
         if repository_ctx.path(cuda_path + "/bin/nvcc" + bin_ext).exists:
             nvcc = str(Label("@local_cuda//:cuda/bin/nvcc{}".format(bin_ext)))
@@ -64,6 +67,12 @@ def _detect_local_cuda_toolkit(repository_ctx):
             bin2c = str(Label("@local_cuda//:cuda/bin/bin2c{}".format(bin_ext)))
         if repository_ctx.path(cuda_path + "/bin/fatbinary" + bin_ext).exists:
             fatbinary = str(Label("@local_cuda//:cuda/bin/fatbinary{}".format(bin_ext)))
+        if repository_ctx.path(cuda_path + "/bin/cudafe++" + bin_ext).exists:
+            cudafe = str(Label("@local_cuda//:cuda/bin/cudafe++{}".format(bin_ext)))
+        if repository_ctx.path(cuda_path + "/nvvm/bin/cicc" + bin_ext).exists:
+            cicc = str(Label("@local_cuda//:cuda/nvvm/bin/cicc{}".format(bin_ext)))
+        if repository_ctx.path(cuda_path + "/bin/ptxas" + bin_ext).exists:
+            ptxas = str(Label("@local_cuda//:cuda/bin/ptxas{}".format(bin_ext)))
 
     nvcc_version_major = -1
     nvcc_version_minor = -1
@@ -84,6 +93,10 @@ def _detect_local_cuda_toolkit(repository_ctx):
         link_stub_label = link_stub,
         bin2c_label = bin2c,
         fatbinary_label = fatbinary,
+        cudafe_label = cudafe,
+        cudafe_clang_version = "170000",
+        cicc_label = cicc,
+        ptxas_label = ptxas,
     )
 
 def _detect_deliverable_cuda_toolkit(repository_ctx):
@@ -101,6 +114,9 @@ def _detect_deliverable_cuda_toolkit(repository_ctx):
     link_stub = "{}//:nvcc/bin/crt/link.stub".format(nvcc_repo)
     bin2c = "{}//:nvcc/bin/bin2c{}".format(nvcc_repo, bin_ext)
     fatbinary = "{}//:nvcc/bin/fatbinary{}".format(nvcc_repo, bin_ext)
+    cudafe = "{}//:nvcc/bin/cudafe++{}".format(nvcc_repo, bin_ext)
+    cicc = "{}//:nvcc/nvvm/bin/cicc{}".format(nvcc_repo, bin_ext)
+    ptxas = "{}//:nvcc/bin/ptxas{}".format(nvcc_repo, bin_ext)
 
     cuda_version_str = repository_ctx.attr.version
     if cuda_version_str == None or cuda_version_str == "":
@@ -124,6 +140,10 @@ def _detect_deliverable_cuda_toolkit(repository_ctx):
         link_stub_label = link_stub,
         bin2c_label = bin2c,
         fatbinary_label = fatbinary,
+        cudafe_label = cudafe,
+        cudafe_clang_version = "170000",
+        cicc_label = cicc,
+        ptxas_label = ptxas,
     )
 
 def detect_cuda_toolkit(repository_ctx):

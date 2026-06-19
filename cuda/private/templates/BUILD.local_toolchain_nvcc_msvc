@@ -10,10 +10,14 @@ load(
 cuda_toolkit(
     name = "cuda-toolkit",
     bin2c = "%{bin2c_label}",
+    cicc = "%{cicc_label}",
+    cudafe = "%{cudafe_label}",
+    cudafe_clang_version = "%{cudafe_clang_version}",
     fatbinary = "%{fatbinary_label}",
     link_stub = "%{link_stub_label}",
     nvlink = "%{nvlink_label}",
     path = "%{cuda_path}",
+    ptxas = "%{ptxas_label}",
     version = "%{cuda_version}",
 )
 

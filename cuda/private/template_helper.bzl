@@ -148,6 +148,10 @@ def _generate_toolchain_build(repository_ctx, cuda):
         "%{link_stub_label}": cuda.link_stub_label,
         "%{bin2c_label}": cuda.bin2c_label,
         "%{fatbinary_label}": cuda.fatbinary_label,
+        "%{cudafe_label}": cuda.cudafe_label,
+        "%{cudafe_clang_version}": cuda.cudafe_clang_version,
+        "%{cicc_label}": cuda.cicc_label,
+        "%{ptxas_label}": cuda.ptxas_label,
     }
     env_tmp = repository_ctx.os.environ.get("TMP", repository_ctx.os.environ.get("TEMP", None))
     if env_tmp != None:
@@ -165,6 +169,10 @@ def _generate_toolchain_clang_build(repository_ctx, cuda, clang_path):
         "%{link_stub_label}": cuda.link_stub_label,
         "%{bin2c_label}": cuda.bin2c_label,
         "%{fatbinary_label}": cuda.fatbinary_label,
+        "%{cudafe_label}": cuda.cudafe_label,
+        "%{cudafe_clang_version}": cuda.cudafe_clang_version,
+        "%{cicc_label}": cuda.cicc_label,
+        "%{ptxas_label}": cuda.ptxas_label,
     }
     repository_ctx.template("toolchain/clang/BUILD", tpl_label, substitutions = substitutions, executable = False)
 

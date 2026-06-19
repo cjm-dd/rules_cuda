@@ -25,3 +25,21 @@ cc_binary(
     srcs = ["dummy.cpp"],
     defines = ["TOOLNAME=fatbinary"],
 )
+
+cc_binary(
+    name = "cudafe++",
+    srcs = ["dummy.cpp"],
+    defines = ["TOOLNAME=cudafe++"],
+)
+
+cc_binary(
+    name = "cicc",
+    srcs = ["dummy.cpp"],
+    defines = ["TOOLNAME=cicc"],
+)
+
+cc_binary(
+    name = "ptxas",
+    srcs = ["dummy.cpp"],
+    defines = ["TOOLNAME=ptxas"],
+)
