@@ -99,7 +99,6 @@ CudaToolkitInfo = provider(
         "link_stub": "File to the link.stub file",
         "bin2c": "File to the bin2c executable",
         "cudafe": "File to the cudafe++ executable",
-        "cudafe_clang_version": "Clang version integer passed to cudafe++ when using clang as the host compiler",
         "cicc": "File to the cicc executable",
         "ptxas": "File to the ptxas executable",
         "fatbinary": "File to the fatbinary executable",

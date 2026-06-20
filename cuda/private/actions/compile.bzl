@@ -8,6 +8,46 @@ load("//cuda/private:toolchain.bzl", "find_cuda_toolkit")
 
 _IDENTIFIER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
+_CudaFatbinaryInputInfo = provider(
+    fields = {
+        "arch": "CUDA SM architecture string.",
+        "file": "Cubin file for the architecture.",
+    },
+)
+
+_CudaStage2FilesInfo = provider(
+    fields = {
+        "arch": "CUDA SM architecture string.",
+        "cubin": "Assembled cubin file.",
+    },
+)
+
+_CudaArchFilesInfo = provider(
+    fields = {
+        "arch": "CUDA compute architecture string.",
+        "cpp1_ii": "Device preprocessed source file.",
+        "cudafe_c": "cicc-generated cudafe C file.",
+        "gpu": "cicc-generated device metadata file.",
+        "ptx": "cicc-generated PTX file.",
+        "stage2s": "List of _CudaStage2FilesInfo values.",
+        "stub": "cudafe-generated host stub file.",
+    },
+)
+
+_CudaSplitFilesInfo = provider(
+    fields = {
+        "cpp4_ii": "Host preprocessed source file.",
+        "fatbin": "Fatbinary output.",
+        "fatbin_c": "C source embedding the fatbinary.",
+        "fatbinary_inputs": "List of _CudaFatbinaryInputInfo values.",
+        "host_arch": "CUDA compute architecture used for host stub compilation.",
+        "host_cudafe_cpp": "cudafe-generated host C++ source.",
+        "host_stub": "cudafe-generated host stub for the selected host arch.",
+        "module_id": "Stable module id file.",
+        "per_arch": "List of _CudaArchFilesInfo values.",
+    },
+)
+
 def _sanitize_identifier(value):
     result = []
     for char in value.elems():
@@ -37,6 +77,9 @@ def _declare_nvcc_file(actions, intermediate_dir, filename):
 def _cuda_toolkit_root(cuda_toolkit):
     return paths.dirname(cuda_toolkit.cudafe.dirname)
 
+def _cuda_include(cuda_toolkit):
+    return paths.join(_cuda_toolkit_root(cuda_toolkit), "include")
+
 def _cuda_phase_env(cuda_toolkit, env):
     root = _cuda_toolkit_root(cuda_toolkit)
     ret = dict(env)
@@ -49,9 +92,6 @@ def _cuda_phase_env(cuda_toolkit, env):
     ])
     ret["TOP"] = root
     return ret
-
-def _cuda_include(cuda_toolkit):
-    return paths.join(_cuda_toolkit_root(cuda_toolkit), "include")
 
 def _numeric_cuda_arch(arch):
     for char in arch.elems():
@@ -84,24 +124,6 @@ def _cxx_standard_for_cuda_frontend(compile_flags):
             fail("unsupported CUDA C++ standard flag '{}'".format(flag))
     return None
 
-def _cuda_frontend_flags(cuda_toolkit, cuda_feature_config, compile_flags):
-    flags = []
-    std = _cxx_standard_for_cuda_frontend(compile_flags)
-    if std:
-        flags.append(std)
-    flags.extend([
-        "--clang",
-        "--clang_version={}".format(cuda_toolkit.cudafe_clang_version),
-        "--display_error_number",
-        "--unicode_source_kind=UTF-8",
-        "--allow_managed",
-    ])
-    if cuda_helper.is_enabled(cuda_feature_config, "nvcc_extended_lambda"):
-        flags.append("--extended-lambda")
-    if cuda_helper.is_enabled(cuda_feature_config, "nvcc_relaxed_constexpr"):
-        flags.append("--relaxed_constexpr")
-    return flags
-
 def _cuda_common_defines(cuda_feature_config, arch_list, cuda_arch = None, for_preprocess = True):
     defines = [
         "__CUDA_ARCH_LIST__={}".format(arch_list),
@@ -127,107 +149,195 @@ def _cuda_version_defines(cuda_toolkit):
         "__CUDACC_VER_BUILD__=0",
     ]
 
-def _add_prefixed(args, prefix, values):
-    for value in values:
-        args.add(prefix)
-        args.add(value)
+def _cuda_preprocessor_defines(cuda_toolkit, cuda_feature_config, arch_list, cuda_arch = None):
+    return (
+        _cuda_common_defines(cuda_feature_config, arch_list, cuda_arch = cuda_arch) +
+        _cuda_version_defines(cuda_toolkit) +
+        ["CUDA_DOUBLE_MATH_FUNCTIONS"]
+    )
 
-def _add_defines(args, defines):
-    for define in defines:
-        args.add("-D{}".format(define))
-
-def _add_include_flags(args, common, cuda_toolkit):
-    args.add("-I")
-    args.add(_cuda_include(cuda_toolkit))
-    _add_prefixed(args, "-I", common.quote_includes)
-    _add_prefixed(args, "-I", common.includes)
-    _add_prefixed(args, "-isystem", common.system_includes)
-
-def _add_cuda_preprocess_mode_flags(args, cuda_feature_config):
-    if cuda_helper.is_enabled(cuda_feature_config, "dbg"):
-        args.add_all(["-O0", "-g"])
-    elif cuda_helper.is_enabled(cuda_feature_config, "fastbuild"):
-        args.add_all(["-O0", "-g1"])
-    elif cuda_helper.is_enabled(cuda_feature_config, "opt"):
-        args.add_all(["-g1", "-ffunction-sections", "-fdata-sections", "-O3"])
-        args.add("-DNDEBUG")
-
-def _add_cuda_preprocess_common_args(
-        args,
+def _host_preprocess_variables(
+        ctx,
+        cc_toolchain,
+        cc_feature_configuration,
         common,
         cuda_toolkit,
         cuda_feature_config,
+        output,
+        src,
         arch_list,
         cuda_arch = None):
-    args.add_all(common.compile_flags)
-    _add_defines(args, common.local_defines + common.defines)
-    _add_defines(args, common.host_local_defines + common.host_defines)
-    _add_defines(args, _cuda_common_defines(cuda_feature_config, arch_list, cuda_arch = cuda_arch))
-    _add_defines(args, _cuda_version_defines(cuda_toolkit))
-    args.add("-DCUDA_DOUBLE_MATH_FUNCTIONS")
-    _add_cuda_preprocess_mode_flags(args, cuda_feature_config)
-    args.add("-m64")
-    if common.sysroot:
-        args.add("--sysroot={}".format(common.sysroot))
-    _add_include_flags(args, common, cuda_toolkit)
-    args.add_all(["-include", "cuda_runtime.h"])
+    return cc_common.create_compile_variables(
+        cc_toolchain = cc_toolchain,
+        feature_configuration = cc_feature_configuration,
+        source_file = src.path,
+        output_file = output.path,
+        user_compile_flags = ctx.fragments.cpp.cxxopts + ctx.fragments.cpp.copts + common.compile_flags + [
+            "-x",
+            "c++",
+            "-include",
+            "cuda_runtime.h",
+        ],
+        include_directories = depset(direct = [_cuda_include(cuda_toolkit)] + common.includes),
+        quote_include_directories = depset(direct = common.quote_includes),
+        system_include_directories = depset(direct = common.system_includes),
+        preprocessor_defines = depset(direct = (
+            common.local_defines +
+            common.defines +
+            common.host_local_defines +
+            common.host_defines +
+            _cuda_preprocessor_defines(cuda_toolkit, cuda_feature_config, arch_list, cuda_arch = cuda_arch)
+        )),
+        variables_extension = {"output_preprocess_file": output.path},
+    )
+
+def _clang_major_from_builtin_include(include_dir):
+    parts = include_dir.split("/")
+    for i in range(len(parts) - 2):
+        if parts[i] == "lib" and parts[i + 1] == "clang":
+            major = parts[i + 2].split(".")[0]
+            if major.isdigit():
+                return major
+    return None
+
+def _clang_major_from_name(value):
+    for separator in ["-", "_"]:
+        parts = value.split(separator)
+        for i in range(len(parts) - 1):
+            if parts[i] == "clang" and parts[i + 1].isdigit():
+                return parts[i + 1]
+    return None
+
+def _cudafe_clang_version(cc_toolchain):
+    for include_dir in cc_toolchain.built_in_include_directories:
+        major = _clang_major_from_builtin_include(include_dir)
+        if major:
+            return "{}0000".format(major)
+    for value in [cc_toolchain.compiler, cc_toolchain.compiler_executable]:
+        major = _clang_major_from_name(value)
+        if major:
+            return "{}0000".format(major)
+    fail("could not derive cudafe clang version from the selected C++ toolchain")
+
+def _cuda_frontend_flags(cuda_feature_config, compile_flags, cudafe_clang_version):
+    flags = []
+    std = _cxx_standard_for_cuda_frontend(compile_flags)
+    if std:
+        flags.append(std)
+    flags.extend([
+        "--clang",
+        "--clang_version={}".format(cudafe_clang_version),
+        "--display_error_number",
+        "--unicode_source_kind=UTF-8",
+        "--allow_managed",
+    ])
+    if cuda_helper.is_enabled(cuda_feature_config, "nvcc_extended_lambda"):
+        flags.append("--extended-lambda")
+    if cuda_helper.is_enabled(cuda_feature_config, "nvcc_relaxed_constexpr"):
+        flags.append("--relaxed_constexpr")
+    return flags
+
+def _run_host_preprocess_action(
+        actions,
+        cc_feature_configuration,
+        cuda_feature_config,
+        variables,
+        inputs,
+        output,
+        progress_message):
+    args = actions.args()
+    args.add_all(cc_common.get_memory_inefficient_command_line(
+        feature_configuration = cc_feature_configuration,
+        action_name = CC_ACTION_NAMES.cpp_compile,
+        variables = variables,
+    ))
+    actions.run(
+        executable = cuda_helper.get_tool_for_action(
+            cuda_feature_config,
+            ACTION_NAMES.cuda_preprocess,
+        ),
+        arguments = [args],
+        outputs = [output],
+        inputs = inputs,
+        env = cc_common.get_environment_variables(
+            feature_configuration = cc_feature_configuration,
+            action_name = CC_ACTION_NAMES.cpp_compile,
+            variables = variables,
+        ),
+        mnemonic = "CudaPreprocess",
+        progress_message = progress_message,
+    )
 
 def _run_host_preprocess(
+        ctx,
         actions,
-        host_compiler,
+        cc_toolchain,
+        cc_feature_configuration,
         cuda_toolkit,
         cuda_feature_config,
         common,
-        env,
         inputs,
         output,
         src,
         arch_list):
-    args = actions.args()
-    _add_cuda_preprocess_common_args(args, common, cuda_toolkit, cuda_feature_config, arch_list)
-    args.add_all(["-E", "-x", "c++"])
-    args.add(src.path)
-    args.add_all(["-o", output.path])
-    actions.run(
-        executable = host_compiler,
-        arguments = [args],
-        outputs = [output],
+    variables = _host_preprocess_variables(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        cc_feature_configuration = cc_feature_configuration,
+        common = common,
+        cuda_toolkit = cuda_toolkit,
+        cuda_feature_config = cuda_feature_config,
+        output = output,
+        src = src,
+        arch_list = arch_list,
+    )
+    _run_host_preprocess_action(
+        actions = actions,
+        cc_feature_configuration = cc_feature_configuration,
+        cuda_feature_config = cuda_feature_config,
+        variables = variables,
         inputs = inputs,
-        env = env,
-        mnemonic = "CudaHostPreprocess",
+        output = output,
         progress_message = "CUDA host preprocess %s" % src.path,
     )
 
 def _run_device_preprocess(
+        ctx,
         actions,
-        host_compiler,
+        cc_toolchain,
+        cc_feature_configuration,
         cuda_toolkit,
         cuda_feature_config,
         common,
-        env,
         inputs,
         output,
         src,
         arch_list,
         arch):
-    args = actions.args()
-    _add_cuda_preprocess_common_args(args, common, cuda_toolkit, cuda_feature_config, arch_list, cuda_arch = arch)
-    args.add_all(["-E", "-x", "c++"])
-    args.add(src.path)
-    args.add_all(["-o", output.path])
-    actions.run(
-        executable = host_compiler,
-        arguments = [args],
-        outputs = [output],
+    variables = _host_preprocess_variables(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        cc_feature_configuration = cc_feature_configuration,
+        common = common,
+        cuda_toolkit = cuda_toolkit,
+        cuda_feature_config = cuda_feature_config,
+        output = output,
+        src = src,
+        arch_list = arch_list,
+        cuda_arch = arch,
+    )
+    _run_host_preprocess_action(
+        actions = actions,
+        cc_feature_configuration = cc_feature_configuration,
+        cuda_feature_config = cuda_feature_config,
+        variables = variables,
         inputs = inputs,
-        env = env,
-        mnemonic = "CudaDevicePreprocess",
+        output = output,
         progress_message = "CUDA device preprocess %s for compute_%s" % (src.path, arch),
     )
 
 def _run_cudafe(
         actions,
-        cuda_toolkit,
         cuda_feature_config,
         common,
         env,
@@ -236,9 +346,10 @@ def _run_cudafe(
         module_id,
         stub,
         src,
-        preprocessed_src):
+        preprocessed_src,
+        cudafe_clang_version):
     args = actions.args()
-    args.add_all(_cuda_frontend_flags(cuda_toolkit, cuda_feature_config, common.compile_flags))
+    args.add_all(_cuda_frontend_flags(cuda_feature_config, common.compile_flags, cudafe_clang_version))
     args.add("--orig_src_file_name")
     args.add(src.path)
     args.add("--orig_src_path_name")
@@ -253,18 +364,17 @@ def _run_cudafe(
     args.add(module_id.path)
     args.add(preprocessed_src.path)
     actions.run(
-        executable = cuda_toolkit.cudafe,
+        executable = cuda_helper.get_tool_for_action(cuda_feature_config, ACTION_NAMES.cuda_frontend),
         arguments = [args],
         outputs = [output],
         inputs = inputs,
         env = env,
-        mnemonic = "CudaCudafe",
-        progress_message = "CUDA cudafe %s" % src.path,
+        mnemonic = "CudaFrontend",
+        progress_message = "CUDA frontend %s" % src.path,
     )
 
 def _run_cicc(
         actions,
-        cuda_toolkit,
         cuda_feature_config,
         common,
         env,
@@ -273,9 +383,10 @@ def _run_cicc(
         src,
         arch_files,
         module_id,
-        fatbin_c_basename):
+        fatbin_c_basename,
+        cudafe_clang_version):
     args = actions.args()
-    args.add_all(_cuda_frontend_flags(cuda_toolkit, cuda_feature_config, common.compile_flags))
+    args.add_all(_cuda_frontend_flags(cuda_feature_config, common.compile_flags, cudafe_clang_version))
     args.add("--orig_src_file_name")
     args.add(src.path)
     args.add("--orig_src_path_name")
@@ -305,18 +416,18 @@ def _run_cicc(
         arch_files.ptx.path,
     ])
     actions.run(
-        executable = cuda_toolkit.cicc,
+        executable = cuda_helper.get_tool_for_action(cuda_feature_config, ACTION_NAMES.cuda_device_compile),
         arguments = [args],
         outputs = outputs,
         inputs = inputs,
         env = env,
-        mnemonic = "CudaCicc",
-        progress_message = "CUDA cicc %s for compute_%s" % (src.path, arch_files.arch),
+        mnemonic = "CudaDeviceCompile",
+        progress_message = "CUDA device compile %s for compute_%s" % (src.path, arch_files.arch),
     )
 
 def _run_ptxas(
         actions,
-        cuda_toolkit,
+        cuda_feature_config,
         common,
         env,
         inputs,
@@ -331,18 +442,21 @@ def _run_ptxas(
     args.add(ptx.path)
     args.add_all(["-o", output.path])
     actions.run(
-        executable = cuda_toolkit.ptxas,
+        executable = cuda_helper.get_tool_for_action(cuda_feature_config, ACTION_NAMES.cuda_assemble),
         arguments = [args],
         outputs = [output],
         inputs = inputs,
         env = env,
-        mnemonic = "CudaPtxas",
-        progress_message = "CUDA ptxas %s for sm_%s" % (src.path, arch),
+        mnemonic = "CudaAssemble",
+        progress_message = "CUDA assemble %s for sm_%s" % (src.path, arch),
     )
+
+def _format_fatbinary_input(image):
+    return "--image3=kind=elf,sm={},file={}".format(image.arch, image.file.path)
 
 def _run_fatbinary(
         actions,
-        cuda_toolkit,
+        cuda_feature_config,
         env,
         inputs,
         outputs,
@@ -352,11 +466,10 @@ def _run_fatbinary(
     args.add("--create={}".format(split_files.fatbin.path))
     args.add("-64")
     args.add("--cicc-cmdline=-ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1 ")
-    for image in split_files.fatbinary_inputs:
-        args.add("--image3=kind=elf,sm={},file={}".format(image.arch, image.file.path))
+    args.add_all(split_files.fatbinary_inputs, map_each = _format_fatbinary_input)
     args.add("--embedded-fatbin={}".format(split_files.fatbin_c.path))
     actions.run(
-        executable = cuda_toolkit.fatbinary,
+        executable = cuda_helper.get_tool_for_action(cuda_feature_config, ACTION_NAMES.cuda_fatbinary),
         arguments = [args],
         outputs = outputs,
         inputs = inputs,
@@ -419,13 +532,13 @@ def _declare_nvcc_split_files(actions, intermediate_dir, basename, cuda_archs_in
             if stage2_arch.arch != arch:
                 fail("split nvcc compile actions do not yet support sm_{} from compute_{}".format(stage2_arch.arch, arch))
             cubin = _declare_nvcc_file(actions, intermediate_dir, "{}.compute_{}.cubin".format(basename, arch))
-            gpu_stage2s.append(struct(arch = stage2_arch.arch, cubin = cubin))
-            fatbinary_inputs.append(struct(arch = stage2_arch.arch, file = cubin))
+            gpu_stage2s.append(_CudaStage2FilesInfo(arch = stage2_arch.arch, cubin = cubin))
+            fatbinary_inputs.append(_CudaFatbinaryInputInfo(arch = stage2_arch.arch, file = cubin))
 
         stub = _declare_nvcc_file(actions, intermediate_dir, "{}.compute_{}.cudafe1.stub.c".format(basename, arch))
         if arch == host_arch:
             host_stub = stub
-        per_arch.append(struct(
+        per_arch.append(_CudaArchFilesInfo(
             arch = arch,
             cpp1_ii = _declare_nvcc_file(actions, intermediate_dir, "{}.compute_{}.cpp1.ii".format(basename, arch)),
             cudafe_c = _declare_nvcc_file(actions, intermediate_dir, "{}.compute_{}.cudafe1.c".format(basename, arch)),
@@ -438,7 +551,7 @@ def _declare_nvcc_split_files(actions, intermediate_dir, basename, cuda_archs_in
     if not host_stub:
         fail("could not determine nvcc host stub output")
 
-    return struct(
+    return _CudaSplitFilesInfo(
         cpp4_ii = _declare_nvcc_file(actions, intermediate_dir, "{}.cpp4.ii".format(basename)),
         fatbin = _declare_nvcc_file(actions, intermediate_dir, "{}.fatbin".format(basename)),
         fatbin_c = _declare_nvcc_file(actions, intermediate_dir, "{}.fatbin.c".format(basename)),
@@ -456,9 +569,7 @@ def _run_nvcc_split_compile(
         cc_toolchain,
         cc_feature_configuration,
         cuda_toolkit,
-        host_compiler,
         cuda_feature_config,
-        env,
         base_inputs,
         src,
         basename,
@@ -468,8 +579,9 @@ def _run_nvcc_split_compile(
         common,
         pic):
     split_files = _declare_nvcc_split_files(actions, intermediate_dir, basename, cuda_archs_info)
-    cuda_env = _cuda_phase_env(cuda_toolkit, env)
     arch_list = _cuda_arch_list(cuda_archs_info)
+    cuda_env = _cuda_phase_env(cuda_toolkit, {})
+    cudafe_clang_version = _cudafe_clang_version(cc_toolchain)
 
     actions.write(
         output = split_files.module_id,
@@ -477,12 +589,13 @@ def _run_nvcc_split_compile(
     )
 
     _run_host_preprocess(
+        ctx = ctx,
         actions = actions,
-        host_compiler = host_compiler,
+        cc_toolchain = cc_toolchain,
+        cc_feature_configuration = cc_feature_configuration,
         cuda_toolkit = cuda_toolkit,
         cuda_feature_config = cuda_feature_config,
         common = common,
-        env = cuda_env,
         inputs = base_inputs,
         output = split_files.cpp4_ii,
         src = src,
@@ -491,7 +604,6 @@ def _run_nvcc_split_compile(
 
     _run_cudafe(
         actions = actions,
-        cuda_toolkit = cuda_toolkit,
         cuda_feature_config = cuda_feature_config,
         common = common,
         env = cuda_env,
@@ -501,16 +613,18 @@ def _run_nvcc_split_compile(
         stub = split_files.host_stub,
         src = src,
         preprocessed_src = split_files.cpp4_ii,
+        cudafe_clang_version = cudafe_clang_version,
     )
 
     for arch_files in split_files.per_arch:
         _run_device_preprocess(
+            ctx = ctx,
             actions = actions,
-            host_compiler = host_compiler,
+            cc_toolchain = cc_toolchain,
+            cc_feature_configuration = cc_feature_configuration,
             cuda_toolkit = cuda_toolkit,
             cuda_feature_config = cuda_feature_config,
             common = common,
-            env = cuda_env,
             inputs = base_inputs,
             output = arch_files.cpp1_ii,
             src = src,
@@ -519,7 +633,6 @@ def _run_nvcc_split_compile(
         )
         _run_cicc(
             actions = actions,
-            cuda_toolkit = cuda_toolkit,
             cuda_feature_config = cuda_feature_config,
             common = common,
             env = cuda_env,
@@ -529,11 +642,12 @@ def _run_nvcc_split_compile(
             arch_files = arch_files,
             module_id = split_files.module_id,
             fatbin_c_basename = split_files.fatbin_c.basename,
+            cudafe_clang_version = cudafe_clang_version,
         )
         for stage2_files in arch_files.stage2s:
             _run_ptxas(
                 actions = actions,
-                cuda_toolkit = cuda_toolkit,
+                cuda_feature_config = cuda_feature_config,
                 common = common,
                 env = cuda_env,
                 inputs = _phase_inputs(base_inputs, [arch_files.ptx]),
@@ -545,7 +659,7 @@ def _run_nvcc_split_compile(
 
     _run_fatbinary(
         actions = actions,
-        cuda_toolkit = cuda_toolkit,
+        cuda_feature_config = cuda_feature_config,
         env = cuda_env,
         inputs = _phase_inputs(base_inputs, [image.file for image in split_files.fatbinary_inputs]),
         outputs = [split_files.fatbin, split_files.fatbin_c],
@@ -604,7 +718,6 @@ def compile(
         requested_features = ctx.features,
         unsupported_features = ctx.disabled_features,
     )
-    host_compiler = cc_common.get_tool_for_action(feature_configuration = cc_feature_configuration, action_name = CC_ACTION_NAMES.cpp_compile)
     cuda_toolkit = find_cuda_toolkit(ctx)
 
     cuda_feature_config = cuda_helper.configure_features(ctx, cuda_toolchain, requested_features = [ACTION_NAMES.cuda_compile])
@@ -632,29 +745,6 @@ def compile(
         # Otherwise, the index is not presented.
         if basename_counter[basename] > 1:
             filename = "{}/{}".format(basename_index, filename)
-        output_file = "{}/{}/{}".format(_prefix, ctx.attr.name, filename)
-
-        var = cuda_helper.create_compile_variables(
-            cuda_toolchain,
-            cuda_feature_config,
-            common.cuda_archs_info,
-            common.sysroot,
-            source_file = src.path,
-            output_file = output_file,
-            host_compiler = host_compiler,
-            compile_flags = common.compile_flags,
-            host_compile_flags = common.host_compile_flags,
-            include_paths = common.includes,
-            quote_include_paths = common.quote_includes,
-            system_include_paths = common.system_includes,
-            defines = common.local_defines + common.defines,
-            host_defines = common.host_local_defines + common.host_defines,
-            ptxas_flags = common.ptxas_flags,
-            use_pic = pic,
-            use_rdc = rdc,
-        )
-        env = cuda_helper.get_environment_variables(cuda_feature_config, ACTION_NAMES.cuda_compile, var)
-
         cuda_subtools = [
             cuda_toolkit.cicc,
             cuda_toolkit.cudafe,
@@ -671,9 +761,7 @@ def compile(
             cc_toolchain = cc_toolchain,
             cc_feature_configuration = cc_feature_configuration,
             cuda_toolkit = cuda_toolkit,
-            host_compiler = host_compiler,
             cuda_feature_config = cuda_feature_config,
-            env = env,
             base_inputs = inputs,
             src = src,
             basename = basename,

@@ -94,7 +94,6 @@ def _detect_local_cuda_toolkit(repository_ctx):
         bin2c_label = bin2c,
         fatbinary_label = fatbinary,
         cudafe_label = cudafe,
-        cudafe_clang_version = "170000",
         cicc_label = cicc,
         ptxas_label = ptxas,
     )
@@ -141,7 +140,6 @@ def _detect_deliverable_cuda_toolkit(repository_ctx):
         bin2c_label = bin2c,
         fatbinary_label = fatbinary,
         cudafe_label = cudafe,
-        cudafe_clang_version = "170000",
         cicc_label = cicc,
         ptxas_label = ptxas,
     )

@@ -13,6 +13,7 @@ load(
     "feature",
     "flag_group",
     "flag_set",
+    "tool",
 )
 load("//cuda/private:toolchain_configs/utils.bzl", "nvcc_version_ge")
 
@@ -52,6 +53,7 @@ def _impl(ctx):
         feature_configuration = cc_feature_configuration,
         action_name = CC_ACTION_NAMES.cpp_compile,
     )
+    cuda_toolkit = ctx.attr.cuda_toolkit[CudaToolkitInfo]
 
     c_compile_variables = cc_common.create_compile_variables(
         feature_configuration = cc_feature_configuration,
@@ -131,6 +133,11 @@ def _impl(ctx):
             ]),
         ],
         implies = [
+            ACTION_NAMES.cuda_preprocess,
+            ACTION_NAMES.cuda_frontend,
+            ACTION_NAMES.cuda_device_compile,
+            ACTION_NAMES.cuda_assemble,
+            ACTION_NAMES.cuda_fatbinary,
             "host_compiler_path",
             "include_paths",
             "defines",
@@ -139,6 +146,31 @@ def _impl(ctx):
             "compiler_output_flags",
             "nvcc_compile_env",
         ],
+    )
+
+    cuda_preprocess_action = action_config(
+        action_name = ACTION_NAMES.cuda_preprocess,
+        tools = [tool(path = host_compiler)],
+    )
+
+    cuda_frontend_action = action_config(
+        action_name = ACTION_NAMES.cuda_frontend,
+        tools = [tool(path = cuda_toolkit.cudafe.path)],
+    )
+
+    cuda_device_compile_action = action_config(
+        action_name = ACTION_NAMES.cuda_device_compile,
+        tools = [tool(path = cuda_toolkit.cicc.path)],
+    )
+
+    cuda_assemble_action = action_config(
+        action_name = ACTION_NAMES.cuda_assemble,
+        tools = [tool(path = cuda_toolkit.ptxas.path)],
+    )
+
+    cuda_fatbinary_action = action_config(
+        action_name = ACTION_NAMES.cuda_fatbinary,
+        tools = [tool(path = cuda_toolkit.fatbinary.path)],
     )
 
     supports_compiler_device_link_feature = feature(name = "supports_compiler_device_link")
@@ -512,6 +544,11 @@ def _impl(ctx):
 
     action_configs = [
         cuda_compile_action,
+        cuda_preprocess_action,
+        cuda_frontend_action,
+        cuda_device_compile_action,
+        cuda_assemble_action,
+        cuda_fatbinary_action,
         cuda_device_link_action,
     ]
 

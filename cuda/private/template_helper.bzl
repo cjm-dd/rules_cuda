@@ -149,7 +149,6 @@ def _generate_toolchain_build(repository_ctx, cuda):
         "%{bin2c_label}": cuda.bin2c_label,
         "%{fatbinary_label}": cuda.fatbinary_label,
         "%{cudafe_label}": cuda.cudafe_label,
-        "%{cudafe_clang_version}": cuda.cudafe_clang_version,
         "%{cicc_label}": cuda.cicc_label,
         "%{ptxas_label}": cuda.ptxas_label,
     }
@@ -170,7 +169,6 @@ def _generate_toolchain_clang_build(repository_ctx, cuda, clang_path):
         "%{bin2c_label}": cuda.bin2c_label,
         "%{fatbinary_label}": cuda.fatbinary_label,
         "%{cudafe_label}": cuda.cudafe_label,
-        "%{cudafe_clang_version}": cuda.cudafe_clang_version,
         "%{cicc_label}": cuda.cicc_label,
         "%{ptxas_label}": cuda.ptxas_label,
     }
