@@ -133,11 +133,6 @@ def _impl(ctx):
             ]),
         ],
         implies = [
-            ACTION_NAMES.cuda_preprocess,
-            ACTION_NAMES.cuda_frontend,
-            ACTION_NAMES.cuda_device_compile,
-            ACTION_NAMES.cuda_assemble,
-            ACTION_NAMES.cuda_fatbinary,
             "host_compiler_path",
             "include_paths",
             "defines",
